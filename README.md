@@ -84,7 +84,7 @@ await cachedLLM.resetCache()
 ## Acknowledgments
 
 This library is inspired by and follows the prompt caching patterns from:
-- [mlx-lm](https://github.com/ml-explore/mlx-examples/tree/main/llms/mlx_lm) - The original Python implementation of prompt caching in MLX
+- [mlx-lm](https://github.com/ml-explore/mlx-lm) - The original Python implementation of prompt caching in MLX
 - [mlx-swift-examples](https://github.com/ml-explore/mlx-swift-examples) - Swift implementations of MLX examples
 
 The prefix prompt caching approach is directly adapted from mlx-lm's efficient caching strategy, bringing the same performance benefits to Swift applications.

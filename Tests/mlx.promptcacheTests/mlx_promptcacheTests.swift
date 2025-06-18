@@ -142,4 +142,79 @@ final class MLXPromptCacheTests: XCTestCase {
         XCTAssertTrue(response3.lowercased().contains("berlin"), "Response for Turn 3 should contain 'Berlin'.")
         XCTAssertFalse(response3.lowercased().contains("arthur"), "Response for Turn 3 should not contain old context, proving the cache was reset.")
     }
+    
+    func testIdenticalPromptHandling() async throws {
+        let modelId = "mlx-community/Qwen3-0.6B-4bit-DWQ-053125"
+        let modelConfiguration = LLMRegistry.shared.configuration(id: modelId)
+        let localModelPath = modelConfiguration.modelDirectory()
+        
+        guard FileManager.default.fileExists(atPath: localModelPath.path) else {
+            throw XCTSkip("""
+            Skipping test: Model '\(modelId)' not found locally at \(localModelPath.path).
+            Please download it first using the mlx_lm Python package:
+            'mlx_lm.generate --model \(modelId) --prompt "hello" --max-tokens 1'
+            """)
+        }
+        
+        print("Loading model: \(modelId)...")
+        self.modelContext = try await LLMModelFactory.shared.load(configuration: modelConfiguration)
+        print("Model loaded successfully.")
+
+        self.cachedLLM = try XCTUnwrap(
+            CachedLLM(modelContext: self.modelContext),
+            "Failed to initialize CachedLLM. The model type might not be supported."
+        )
+        
+        let generateParams = GenerateParameters(maxTokens: 20, temperature: 0.0)
+        
+        // MARK: - Turn 1: Initial prompt
+        print("\n--- Turn 1: Initial prompt ---")
+        
+        let prompt = "What is 2 + 2?"
+        let chatHistory: [Chat.Message] = [.user(prompt)]
+        
+        let stream1 = try await cachedLLM.generate(
+            input: UserInput(chat: chatHistory),
+            parameters: generateParams
+        )
+        
+        let response1 = try await collectString(from: stream1)
+        print("User: \(prompt)")
+        print("Assistant: \(response1)")
+        
+        // Verify initial generation
+        var stats = await cachedLLM.cacheStats
+        let tokensReusedAfterTurn1 = stats.tokensReused
+        print("Tokens reused after Turn 1: \(tokensReusedAfterTurn1)")
+        XCTAssertEqual(tokensReusedAfterTurn1, 0, "Turn 1 should reuse 0 tokens (no cache yet).")
+        
+        // MARK: - Turn 2: Identical prompt (testing the fix)
+        print("\n--- Turn 2: Identical prompt ---")
+        
+        let stream2 = try await cachedLLM.generate(
+            input: UserInput(chat: chatHistory),  // Same exact prompt
+            parameters: generateParams
+        )
+        
+        let response2 = try await collectString(from: stream2)
+        print("User: \(prompt)")
+        print("Assistant: \(response2)")
+        
+        // Verify cache behavior with identical prompt
+        stats = await cachedLLM.cacheStats
+        let tokensReusedAfterTurn2 = stats.tokensReused
+        print("Tokens reused after Turn 2: \(tokensReusedAfterTurn2)")
+        
+        // The fix ensures we reuse all but the last token
+        let processor = self.modelContext.processor
+        let lmInput = try await processor.prepare(input: UserInput(chat: chatHistory))
+        let totalTokens = lmInput.text.tokens.asArray(Int.self).count
+        
+        XCTAssertEqual(tokensReusedAfterTurn2, totalTokens - 1, 
+                      "With identical prompt, should reuse all tokens except the last one")
+        XCTAssertEqual(stats.trims, 1, "Should have trimmed once to handle the identical prompt")
+        
+        // Responses should be identical since temperature is 0
+        XCTAssertEqual(response1, response2, "Responses should be identical with temperature 0")
+    }
 }

@@ -127,7 +127,7 @@ public actor CachedLLM {
             return (newTokens, nil)
         }
         
-        let commonLength = commonPrefixLength(cache.tokens, newTokens)
+        let commonLength: Int = min(commonPrefixLength(cache.tokens, newTokens), newTokens.count - 1)
         
         guard commonLength > 0 else {
             cacheStats.misses += 1
